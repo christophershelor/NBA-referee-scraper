@@ -17,6 +17,7 @@ import re
 from typing import List
 import time
 import random
+from datetime import datetime
 
 import requests
 from bs4 import BeautifulSoup
@@ -28,18 +29,21 @@ load_dotenv()
 # Config (from env)
 SCRAPE_URL = os.getenv("SCRAPE_URL")
 CSS_SELECTOR = os.getenv("CSS_SELECTOR", "body")
+# Support multiple selectors (comma-separated)
+CSS_SELECTORS = [s.strip() for s in CSS_SELECTOR.split(",")] if CSS_SELECTOR else ["body"]
 MAX_ITEMS = int(os.getenv("MAX_ITEMS", "20"))
 USER_AGENT = os.getenv("USER_AGENT", "daily-scraper/1.0 (+https://example.com)")
 TIMEOUT = float(os.getenv("REQUEST_TIMEOUT", "15"))
 
-SMTP_HOST = os.getenv("SMTP_HOST")
+# Email config with proper defaults for type checking
+SMTP_HOST = os.getenv("SMTP_HOST", "")  # Empty string as default
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USER = os.getenv("SMTP_USER")
-SMTP_PASS = os.getenv("SMTP_PASS")
-EMAIL_FROM = os.getenv("EMAIL_FROM")
-EMAIL_TO = os.getenv("EMAIL_TO")
+SMTP_USER = os.getenv("SMTP_USER", "")  # Empty string as default
+SMTP_PASS = os.getenv("SMTP_PASS", "")  # Empty string as default
+EMAIL_FROM = os.getenv("EMAIL_FROM", "")  # Empty string as default
+EMAIL_TO = os.getenv("EMAIL_TO", "")  # Empty string as default
 EMAIL_SUBJECT_PREFIX = os.getenv("EMAIL_SUBJECT_PREFIX", "Daily Scrape")
-SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY")
+SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "")
 
 # Retry/backoff configuration
 RETRIES = int(os.getenv("RETRIES", "3"))
@@ -98,26 +102,67 @@ def fetch(url: str) -> str:
     raise ScrapeError(last_exc)
 
 
-def parse(html: str, selector: str, max_items: int) -> List[str]:
+def parse(html: str, selectors: List[str], max_items: int) -> List[str]:
     soup = BeautifulSoup(html, "lxml")
-    nodes = soup.select(selector)
-    logger.info(f"Found {len(nodes)} nodes for selector '{selector}'")
     results = []
-    for n in nodes[:max_items]:
-        text = n.get_text(separator=" ", strip=True)
-        # If it's a link, also include href
-        href = None
-        if n.name == "a" and n.has_attr("href"):
-            href = n["href"]
-        # attempt to find anchors inside
-        if not href:
-            a = n.find("a")
-            if a and a.has_attr("href"):
-                href = a["href"]
-        if href:
-            results.append(f"{text} — {href}")
+    items_per_selector = max_items // len(selectors) if selectors else max_items
+    
+    for selector in selectors:
+        nodes = soup.select(selector)
+        logger.info(f"Found {len(nodes)} nodes for selector '{selector}'")
+        selector_results = []
+        
+        # Process nodes for this selector
+        for n in nodes[:items_per_selector]:
+            # If it's a table row, handle cells separately
+            if n.name == "tr":
+                cells = n.find_all(['td', 'th'])
+                if cells:
+                    row_text = " | ".join(cell.get_text(strip=True) for cell in cells)
+                    selector_results.append(row_text)
+            else:
+                # Non-table content
+                text = n.get_text(separator=" ", strip=True)
+                href = None
+                if n.name == "a" and n.has_attr("href"):
+                    href = n["href"]
+                if not href:
+                    a = n.find("a")
+                    if a and a.has_attr("href"):
+                        href = a["href"]
+                if href:
+                    selector_results.append(f"{text} — {href}")
+                else:
+                    selector_results.append(text)
+        
+        # Add a separator between different selectors' results if needed
+        if selector_results:
+            if results:  # If we already have results from another selector
+                results.append("-" * 20 + f" {selector} " + "-" * 20)
+            results.extend(selector_results)
+    for i, n in enumerate(nodes[:max_items]):
+        # If it's a table row, handle cells separately
+        if n.name == "tr":
+            cells = n.find_all(['td', 'th'])
+            if cells:
+                # Join cells with proper spacing, strip extra whitespace
+                row_text = " | ".join(cell.get_text(strip=True) for cell in cells)
+                results.append(row_text)
         else:
-            results.append(text)
+            # Non-table content
+            text = n.get_text(separator=" ", strip=True)
+            # If it's a link or contains a link, include the href
+            href = None
+            if n.name == "a" and n.has_attr("href"):
+                href = n["href"]
+            if not href:
+                a = n.find("a")
+                if a and a.has_attr("href"):
+                    href = a["href"]
+            if href:
+                results.append(f"{text} — {href}")
+            else:
+                results.append(text)
     return results
 
 
@@ -193,6 +238,8 @@ def send_email(msg: EmailMessage, host: str, port: int, user: str, password: str
         time.sleep(sleep_for)
 
     logger.exception("Failed to send email via SMTP after retries")
+    if last_exc is None:
+        last_exc = Exception("Max retries exceeded")
     raise last_exc
 
 
@@ -243,6 +290,8 @@ def send_via_sendgrid(subject: str, body: str, sender: str, recipients: List[str
         time.sleep(sleep_for)
 
     logger.exception("Failed to send email via SendGrid after retries")
+    if last_exc is None:
+        last_exc = Exception("Max retries exceeded")
     raise last_exc
 
 
@@ -258,12 +307,15 @@ def main(args):
 
     try:
         html = fetch(SCRAPE_URL)
-        items = parse(html, CSS_SELECTOR, MAX_ITEMS)
+        items = parse(html, CSS_SELECTORS, MAX_ITEMS)
 
         if args.inspect:
             limit = getattr(args, "inspect_limit", 10)
-            insp = inspect_selector(html, CSS_SELECTOR, limit=limit)
-            print(f"--- Inspection: first {len(insp)} nodes for selector '{CSS_SELECTOR}' ---")
+            print("\nInspecting all selectors:")
+            for selector in CSS_SELECTORS:
+                print(f"\n--- Selector: {selector} ---")
+                insp = inspect_selector(html, selector, limit=limit)
+                print(f"Found {len(insp)} matching nodes:")
             for e in insp:
                 print(f"[{e['index']}] <{e['tag']}> attrs={e['attrs']}")
                 print(f"text: {e['text_snippet']}")
@@ -273,10 +325,16 @@ def main(args):
         if not items:
             body = f"No results found when scraping {SCRAPE_URL} with selector '{CSS_SELECTOR}'."
         else:
-            lines = [f"Results from {SCRAPE_URL}", "", *[f"- {i}" for i in items]]
+            lines = [
+                f"Results from {SCRAPE_URL}",
+                "-" * 40,  # Add a separator line
+                *items,    # Each item on its own line without bullet points
+                "-" * 40,  # Bottom separator
+            ]
             body = "\n".join(lines)
 
-        subject = f"{EMAIL_SUBJECT_PREFIX}: {SCRAPE_URL}"
+        today = datetime.now().strftime("%m-%d-%Y")
+        subject = f"{EMAIL_SUBJECT_PREFIX} - {today}"
 
         if args.dry_run:
             print("--- DRY RUN: Email body below ---")
@@ -286,9 +344,11 @@ def main(args):
             return 0
 
         recipients = [e.strip() for e in EMAIL_TO.split(",") if e.strip()]
+
+        # Ensure EMAIL_FROM is set (narrow type so type-checkers accept it)
+        assert EMAIL_FROM is not None, "EMAIL_FROM must be configured"
         msg = build_email(subject, body, EMAIL_FROM, recipients)
         send_email(msg, SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS)
-
     except ScrapeError:
         logger.exception("Scrape failed")
         sys.exit(1)
