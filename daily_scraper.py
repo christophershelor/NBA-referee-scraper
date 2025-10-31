@@ -26,14 +26,19 @@ from dotenv import load_dotenv
 # Load .env if present
 load_dotenv()
 
+# Helper function to safely get environment variables
+def get_env(key: str, default: str) -> str:
+    value = os.getenv(key, "").strip()
+    return value if value else default
+
 # Config (from env)
 SCRAPE_URL = os.getenv("SCRAPE_URL")
-CSS_SELECTOR = os.getenv("CSS_SELECTOR", "body")
+CSS_SELECTOR = get_env("CSS_SELECTOR", "body")
 # Support multiple selectors (comma-separated)
 CSS_SELECTORS = [s.strip() for s in CSS_SELECTOR.split(",")] if CSS_SELECTOR else ["body"]
-MAX_ITEMS = int(os.getenv("MAX_ITEMS", "20"))
-USER_AGENT = os.getenv("USER_AGENT", "daily-scraper/1.0 (+https://example.com)")
-TIMEOUT = float(os.getenv("REQUEST_TIMEOUT", "15"))
+MAX_ITEMS = int(get_env("MAX_ITEMS", "20"))
+USER_AGENT = get_env("USER_AGENT", "daily-scraper/1.0 (+https://example.com)")
+TIMEOUT = float(get_env("REQUEST_TIMEOUT", "15"))
 
 # Email config with proper defaults for type checking
 SMTP_HOST = os.getenv("SMTP_HOST", "")  # Empty string as default

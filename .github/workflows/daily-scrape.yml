@@ -43,9 +43,9 @@ jobs:
           EMAIL_SUBJECT_PREFIX: ${{ secrets.EMAIL_SUBJECT_PREFIX }}
           SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
 
-          # Optional tuning
-          USER_AGENT: ${{ secrets.USER_AGENT }}
-          REQUEST_TIMEOUT: ${{ secrets.REQUEST_TIMEOUT }}
+          # Optional tuning (with defaults)
+          USER_AGENT: ${{ secrets.USER_AGENT || 'NBA-referee-scraper/1.0 (GitHub Actions)' }}
+          REQUEST_TIMEOUT: ${{ secrets.REQUEST_TIMEOUT || '15' }}
           LOG_FILE: daily_scraper.log
         run: |
           python ./daily_scraper.py
