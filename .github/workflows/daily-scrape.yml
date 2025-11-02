@@ -27,6 +27,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: ET time guard
+        # Skip the job unless it's 09:30 in America/New_York. This prevents double-runs when two UTC cron
+        # schedules are present to cover DST shifts.
+        run: |
+          NOW=$(TZ="America/New_York" date +%H:%M)
+          echo "Time in New York: $NOW"
+          if [ "$NOW" != "09:30" ]; then
+            echo "Not 09:30 ET, skipping run."
+            exit 0
+          fi
+
       - name: Run scraper
         env:
           # Required configuration (set these as repository secrets)
