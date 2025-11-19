@@ -1,6 +1,6 @@
 # Daily Scraper
 
-This repository contains a small Python script to scrape a website and email the results. It is designed to be run once per day by the Windows Task Scheduler (or any scheduler).
+This repository contains a small Python script to scrape a website and email the results. It is designed to be run once per day by the Windows Task Scheduler or GitHub Actions.
 
 Files
 - `daily_scraper.py` — main script. Reads configuration from environment variables or a `.env` file.
